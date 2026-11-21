@@ -13,6 +13,10 @@ mcp-jail -- npx -y @modelcontextprotocol/server-filesystem .
 [tools/call: summarize_readme] ALLOWED connect(140.82.121.4:443)
 ```
 
+<p align="center">
+  <img src="docs/demo.gif" alt="mcp-jail blocking a tool call that reads .env and an SSH key, then showing the session report and a generated least-privilege policy" width="800" />
+</p>
+
 No root, no SUID binary, no container image. Startup costs a few milliseconds and the release binary is about 1.4 MB.
 
 ## Why
@@ -48,7 +52,7 @@ MCP client ──stdin/stdout──▶ mcp-jail ──pipes──▶ MCP server 
 ## Install
 
 ```bash
-git clone <repository-url> mcp-jail && cd mcp-jail
+git clone https://github.com/Juanmidev1/mcp-jail.git && cd mcp-jail
 cargo install --path .
 ```
 
