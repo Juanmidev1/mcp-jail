@@ -38,14 +38,15 @@ pub fn spawn(
     })
 }
 
-/// Frames are written before they are inspected so correlation never delays transport
+/// Requests are registered before they reach the server, otherwise a fast server could hit
+/// a syscall before its tools/call context exists; parsing one line costs microseconds
 pub fn forward_client_frames(
     input: impl Read,
     mut output: impl Write,
     tracker: &RpcTracker,
     tracer: &Tracer,
 ) -> io::Result<()> {
-    forward_lines(input, &mut output, |line| {
+    forward_lines(input, &mut output, Inspection::BeforeForwarding, |line| {
         for call in tracker.observe_client_line(line) {
             tracer.emit(EventKind::McpCall {
                 method: call.method,
@@ -60,7 +61,9 @@ pub fn forward_server_frames(
     mut output: impl Write,
     tracker: &RpcTracker,
 ) -> io::Result<()> {
-    forward_lines(input, &mut output, |line| tracker.observe_server_line(line))
+    forward_lines(input, &mut output, Inspection::AfterForwarding, |line| {
+        tracker.observe_server_line(line);
+    })
 }
 
 pub fn forward_raw(mut input: impl Read, mut output: impl Write) -> io::Result<()> {
@@ -77,9 +80,16 @@ pub fn forward_raw(mut input: impl Read, mut output: impl Write) -> io::Result<(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Inspection {
+    BeforeForwarding,
+    AfterForwarding,
+}
+
 fn forward_lines(
     input: impl Read,
     output: &mut impl Write,
+    inspection: Inspection,
     mut inspect: impl FnMut(&[u8]),
 ) -> io::Result<()> {
     let mut reader = BufReader::new(input);
@@ -89,9 +99,14 @@ fn forward_lines(
         if reader.read_until(b'\n', &mut line)? == 0 {
             return Ok(());
         }
+        if inspection == Inspection::BeforeForwarding {
+            inspect(&line);
+        }
         output.write_all(&line)?;
         output.flush()?;
-        inspect(&line);
+        if inspection == Inspection::AfterForwarding {
+            inspect(&line);
+        }
     }
 }
 

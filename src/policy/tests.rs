@@ -130,3 +130,22 @@ fn missing_explicit_config_is_an_error() {
     };
     assert!(Policy::load(&args).is_err());
 }
+
+#[test]
+fn resolved_paths_split_read_and_write_access() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut policy = build(PolicyFile::default(), &SandboxArgs::default());
+    policy.ro = vec![
+        PathBuf::from("/usr"),
+        PathBuf::from("/nonexistent-mcp-jail"),
+    ];
+    policy.rw = vec![PathBuf::from(".")];
+    policy.resolve_paths(workspace.path());
+    let root = workspace.path().canonicalize().unwrap();
+    assert_eq!(policy.rw, vec![root.clone()]);
+    assert_eq!(policy.ro.len(), 1);
+    assert!(policy.is_path_allowed(&root.join("src/main.rs"), true));
+    assert!(policy.is_path_allowed(Path::new("/usr/bin/env"), false));
+    assert!(!policy.is_path_allowed(Path::new("/usr/bin/env"), true));
+    assert!(!policy.is_path_allowed(Path::new("/home/tester/notes"), false));
+}

@@ -8,6 +8,8 @@ use ::landlock::{
 
 use crate::policy::Policy;
 
+const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
+
 // Highest ABI requested; the crate's best-effort mode drops rights older kernels lack
 const TARGET_ABI: ABI = ABI::V5;
 
@@ -38,6 +40,18 @@ pub fn enforce(ruleset: RulesetCreated) -> Result<LandlockStatus, Box<dyn Error>
         RulesetStatus::NotEnforced => LandlockStatus::UnsupportedKernel,
         RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => LandlockStatus::Enforced,
     })
+}
+
+pub fn is_supported() -> bool {
+    let abi_version = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0usize,
+            LANDLOCK_CREATE_RULESET_VERSION,
+        )
+    };
+    abi_version >= 1
 }
 
 fn add_path_rule(

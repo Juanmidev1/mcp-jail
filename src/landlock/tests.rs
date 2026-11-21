@@ -7,20 +7,6 @@ use super::*;
 use crate::cli::SandboxArgs;
 use crate::policy::{PolicyFile, SYSTEM_RO_PATHS};
 
-const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
-
-fn kernel_supports_landlock() -> bool {
-    let version = unsafe {
-        libc::syscall(
-            libc::SYS_landlock_create_ruleset,
-            std::ptr::null::<libc::c_void>(),
-            0usize,
-            LANDLOCK_CREATE_RULESET_VERSION,
-        )
-    };
-    version >= 1
-}
-
 fn policy_with(ro: Vec<PathBuf>, rw: Vec<PathBuf>) -> Policy {
     let mut policy = Policy::build(PolicyFile::default(), &SandboxArgs::default(), None);
     policy.ro = SYSTEM_RO_PATHS
@@ -50,7 +36,7 @@ fn run_sandboxed(policy: &Policy, script: &str) -> Output {
 
 #[test]
 fn blocks_reads_outside_allowed_paths() {
-    if !kernel_supports_landlock() {
+    if !is_supported() {
         eprintln!("skipping: kernel without Landlock support");
         return;
     }
@@ -72,7 +58,7 @@ fn blocks_reads_outside_allowed_paths() {
 
 #[test]
 fn read_only_paths_reject_writes() {
-    if !kernel_supports_landlock() {
+    if !is_supported() {
         eprintln!("skipping: kernel without Landlock support");
         return;
     }
