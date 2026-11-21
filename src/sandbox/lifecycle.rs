@@ -97,6 +97,9 @@ fn wait_interval(pidfd: Option<&OwnedFd>) {
 
 /// Installed before spawn so an early Ctrl-C cannot orphan the server's process group
 pub fn install_signal_handlers() {
+    // The flag is process-wide, so a previous session in the same process must not leak
+    // its shutdown request into this one
+    SHUTDOWN_REQUESTED.store(false, Ordering::Relaxed);
     let handler = request_shutdown as extern "C" fn(libc::c_int) as libc::sighandler_t;
     unsafe {
         libc::signal(libc::SIGINT, handler);
@@ -122,4 +125,16 @@ fn exit_code(status: ExitStatus) -> i32 {
     status
         .code()
         .unwrap_or_else(|| SIGNAL_EXIT_BASE + status.signal().unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installing_handlers_clears_a_previous_shutdown_request() {
+        SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
+        install_signal_handlers();
+        assert!(!SHUTDOWN_REQUESTED.load(Ordering::Relaxed));
+    }
 }

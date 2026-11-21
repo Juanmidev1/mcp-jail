@@ -77,3 +77,25 @@ fn ignores_unix_and_truncated_socket_addresses() {
     assert_eq!(parse_socket_address(&sockaddr_bytes(&unix)), None);
     assert_eq!(parse_socket_address(&[2, 0, 1]), None);
 }
+
+#[test]
+fn truncated_open_how_is_left_to_the_kernel() {
+    let policy = crate::policy::Policy::build(
+        crate::policy::PolicyFile::default(),
+        &crate::cli::SandboxArgs::default(),
+        None,
+    );
+    let mut inspector = Inspector::new(std::sync::Arc::new(policy));
+    let open_how = [0u64; 3];
+    let mut request: libc::seccomp_notif = unsafe { std::mem::zeroed() };
+    request.pid = std::process::id();
+    request.data.nr = libc::SYS_openat2 as i32;
+    request.data.args[2] = open_how.as_ptr() as u64;
+    request.data.args[3] = super::inspect::OPEN_HOW_SIZE_VER0 - 1;
+    assert_eq!(inspector.evaluate(&request), None);
+
+    // With a valid size the flags are read, then the null path fails closed
+    request.data.args[3] = super::inspect::OPEN_HOW_SIZE_VER0;
+    let verdict = inspector.evaluate(&request).unwrap();
+    assert!(verdict.is_violation && verdict.target == "<unreadable>");
+}

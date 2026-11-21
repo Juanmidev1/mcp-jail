@@ -10,6 +10,8 @@ use crate::trace::Category;
 // legitimate programs never notice, while a racing writer cannot slip past the checks
 const UNREADABLE_TARGET: &str = "<unreadable>";
 const SOCKADDR_IN6_SIZE: usize = size_of::<libc::sockaddr_in6>();
+// Smallest `struct open_how` the kernel accepts (flags, mode, resolve: three u64)
+pub const OPEN_HOW_SIZE_VER0: u64 = 24;
 #[cfg(target_arch = "x86_64")]
 const CREAT_FLAGS: u64 = (libc::O_CREAT | libc::O_WRONLY | libc::O_TRUNC) as u64;
 
@@ -44,10 +46,7 @@ impl Inspector {
         let dirfd = args[0] as i32;
         match libc::c_long::from(request.data.nr) {
             libc::SYS_openat => self.open_verdict("openat", pid, dirfd, args[1], args[2]),
-            libc::SYS_openat2 => {
-                let flags = remote::read_u64(pid, args[2])?;
-                self.open_verdict("openat2", pid, dirfd, args[1], flags)
-            }
+            libc::SYS_openat2 => self.openat2_verdict(pid, dirfd, args),
             #[cfg(target_arch = "x86_64")]
             libc::SYS_open => self.open_verdict("open", pid, libc::AT_FDCWD, args[0], args[1]),
             #[cfg(target_arch = "x86_64")]
@@ -90,6 +89,16 @@ impl Inspector {
             is_write,
             is_secret: is_denied,
         })
+    }
+
+    /// A truncated `open_how` makes the kernel fail with EINVAL before opening anything,
+    /// so the call continues unread instead of being judged on bytes past the struct
+    fn openat2_verdict(&self, pid: u32, dirfd: i32, args: [u64; 6]) -> Option<Verdict> {
+        if args[3] < OPEN_HOW_SIZE_VER0 {
+            return None;
+        }
+        let flags = remote::read_u64(pid, args[2])?;
+        self.open_verdict("openat2", pid, dirfd, args[1], flags)
     }
 
     fn connect_verdict(&self, pid: u32, address: u64, length: u64) -> Option<Verdict> {
