@@ -87,6 +87,13 @@ impl Tracer {
             .map_err(|_| io::Error::other("trace writer lock poisoned"))?;
         file.write_all(line.as_bytes())
     }
+
+    /// Records an event from a worker thread, reporting failures on stderr
+    pub fn emit(&self, kind: EventKind) {
+        if let Err(error) = self.record(kind) {
+            eprintln!("mcp-jail: failed to write trace event: {error}");
+        }
+    }
 }
 
 pub fn now_ms() -> u64 {
