@@ -19,6 +19,9 @@ pub struct Verdict {
     pub syscall: &'static str,
     pub target: String,
     pub is_violation: bool,
+    pub is_write: bool,
+    /// Matched a deny pattern (secret file), as opposed to falling outside allowed paths
+    pub is_secret: bool,
 }
 
 pub struct Inspector {
@@ -75,16 +78,17 @@ impl Inspector {
         if !paths::is_create(flags) && !canonical.exists() {
             return None;
         }
+        let is_write = paths::is_write_intent(flags);
         let is_denied = self.policy.is_denied_path(&path) || self.policy.is_denied_path(&canonical);
-        let is_outside = !paths::is_path_only(flags)
-            && !self
-                .policy
-                .is_path_allowed(&canonical, paths::is_write_intent(flags));
+        let is_outside =
+            !paths::is_path_only(flags) && !self.policy.is_path_allowed(&canonical, is_write);
         Some(Verdict {
             category: Category::Fs,
             syscall,
             target: path.display().to_string(),
             is_violation: is_denied || is_outside,
+            is_write,
+            is_secret: is_denied,
         })
     }
 
@@ -107,6 +111,8 @@ impl Inspector {
             syscall: "connect",
             target: socket_address.to_string(),
             is_violation: !self.policy.is_ip_allowed(socket_address.ip()),
+            is_write: false,
+            is_secret: false,
         })
     }
 
@@ -135,6 +141,8 @@ impl Inspector {
             syscall,
             target: path.display().to_string(),
             is_violation: self.policy.deny_exec,
+            is_write: false,
+            is_secret: false,
         })
     }
 }
@@ -145,6 +153,8 @@ fn unreadable_verdict(category: Category, syscall: &'static str, is_violation: b
         syscall,
         target: UNREADABLE_TARGET.to_string(),
         is_violation,
+        is_write: false,
+        is_secret: false,
     }
 }
 

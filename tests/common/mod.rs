@@ -1,3 +1,6 @@
+// Each integration test binary uses a different subset of these helpers
+#![allow(dead_code)]
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -17,7 +20,8 @@ impl Session {
     pub fn new() -> Self {
         let session = Self {
             workspace: tempfile::tempdir().unwrap(),
-            home: tempfile::tempdir().unwrap(),
+            // Outside /tmp, which is read-write by default, so home access is really policed
+            home: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         };
         fs::write(session.workspace.path().join(ENV_FILE), "TOKEN=1\n").unwrap();
         fs::write(session.workspace.path().join("README.md"), "hello\n").unwrap();
@@ -31,33 +35,56 @@ impl Session {
     }
 
     pub fn run(&self, flags: &[&str], server: &[&str], stdin: &str) -> Output {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_mcp-jail"))
-            .arg("--log")
-            .arg(self.trace_path())
-            .args(flags)
-            .arg("--")
-            .args(server)
+        let mut command = self.command();
+        command.arg("--log").arg(self.trace_path()).args(flags);
+        command.arg("--").args(server);
+        execute(command, stdin)
+    }
+
+    /// `profile` runs `server`; `tail`/`report` read this session's trace
+    pub fn run_subcommand(&self, subcommand: &str, server: &[&str]) -> Output {
+        let mut command = self.command();
+        command.arg(subcommand);
+        if server.is_empty() {
+            command.arg(self.trace_path());
+        } else {
+            command
+                .arg("--log")
+                .arg(self.trace_path())
+                .arg("--")
+                .args(server);
+        }
+        execute(command, "")
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mcp-jail"));
+        command
             .current_dir(self.workspace.path())
             .env("HOME", self.home.path())
             .env_remove("LOCPATH")
-            .env("LC_ALL", "C")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
-        child.wait_with_output().unwrap()
+            .env("LC_ALL", "C");
+        command
     }
 
     pub fn trace(&self) -> String {
         fs::read_to_string(self.trace_path()).unwrap()
     }
+}
+
+fn execute(mut command: Command, stdin: &str) -> Output {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
 }
 
 pub fn bash(script: &str) -> Vec<&str> {

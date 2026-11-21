@@ -1,11 +1,12 @@
 use std::error::Error;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
 
-use mcp_jail::cli::{Cli, RunArgs};
-use mcp_jail::policy::Policy;
-use mcp_jail::sandbox;
+use mcp_jail::cli::{Cli, RunArgs, Subcommands};
+use mcp_jail::policy::{Policy, default_trace_path, home_dir};
+use mcp_jail::{profile, report, sandbox, tail};
 
 const FAILURE_EXIT_CODE: u8 = 1;
 
@@ -22,13 +23,21 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<u8, Box<dyn Error>> {
     match cli.subcommand {
         None => run_sandbox(&cli.run),
-        // TODO: implement profile, tail and report in the views phase
-        Some(_) => Err("this subcommand is not implemented yet".into()),
+        Some(Subcommands::Profile(run)) => profile::run(&run).map(to_exit_code),
+        Some(Subcommands::Tail { file }) => tail::run(&trace_file(file)).map(|()| 0),
+        Some(Subcommands::Report { file }) => report::run(&trace_file(file)).map(|()| 0),
     }
 }
 
 fn run_sandbox(run: &RunArgs) -> Result<u8, Box<dyn Error>> {
     let policy = Policy::load(&run.sandbox)?;
-    let exit_code = sandbox::run(&run.command, policy)?;
-    Ok(u8::try_from(exit_code).unwrap_or(FAILURE_EXIT_CODE))
+    sandbox::run(&run.command, policy).map(to_exit_code)
+}
+
+fn trace_file(explicit: Option<PathBuf>) -> PathBuf {
+    explicit.unwrap_or_else(|| default_trace_path(home_dir().as_deref()))
+}
+
+fn to_exit_code(code: i32) -> u8 {
+    u8::try_from(code).unwrap_or(FAILURE_EXIT_CODE)
 }

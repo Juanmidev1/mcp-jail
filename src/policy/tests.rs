@@ -27,6 +27,7 @@ fn default_policy_denies_secret_files_and_home_dirs() {
     assert!(policy.is_denied_path(&Path::new("/work").join(ENV_LOCAL_FILE)));
     assert!(policy.is_denied_path(Path::new("/home/tester/.ssh/config")));
     assert!(policy.is_denied_path(&Path::new("/x").join(RSA_KEY_FILE)));
+    assert!(policy.is_denied_path(Path::new(concat!("/home/tester/.npm", "rc"))));
     assert!(!policy.is_denied_path(Path::new("/work/README.md")));
 }
 

@@ -42,6 +42,9 @@ pub enum EventKind {
         target: String,
         pid: i32,
         mcp_context: String,
+        /// File opened for writing; lets `profile` choose between ro and rw grants
+        #[serde(default, skip_serializing_if = "is_false")]
+        write: bool,
     },
     SessionEnd {
         exit_code: i32,
@@ -108,6 +111,17 @@ pub fn parse_line(line: &str) -> Option<TraceEvent> {
     serde_json::from_str(line).ok()
 }
 
+/// Malformed lines (for example a partial write at crash time) are skipped
+pub fn read_events(path: &Path) -> Result<Vec<TraceEvent>, Box<dyn Error>> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| format!("cannot read trace file {}: {e}", path.display()))?;
+    Ok(text.lines().filter_map(parse_line).collect())
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +137,7 @@ mod tests {
                 target: "/w/secret".into(),
                 pid: 42,
                 mcp_context: "tools/call:read_file".into(),
+                write: false,
             },
         };
         let json: serde_json::Value = serde_json::to_value(&event).unwrap();

@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use crate::cli::SandboxArgs;
 pub use access::matches_glob;
 use file::load_policy_file;
-pub use file::{FilesystemSection, NetworkSection, PolicyFile, ProcessSection};
+pub use file::{
+    DEFAULT_CONFIG_FILE, FilesystemSection, NetworkSection, PolicyFile, ProcessSection,
+};
 
 const DEFAULT_TRACE_FILE: &str = ".cache/mcp-jail/latest.jsonl";
 
@@ -57,6 +59,10 @@ pub const SECRET_FILE_PATTERNS: &[&str] = &[
     "id_rsa",
     "id_ed25519",
     "id_ecdsa",
+    // Package manager and network credential stores that usually hold auth tokens
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
 ];
 const ENV_FILE_PATTERNS: &[&str] = &[".env", ".env.*"];
 const HOME_SECRET_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg", ".kube", ".docker"];
@@ -70,6 +76,9 @@ pub struct Policy {
     pub allow_ips: Vec<IpAddr>,
     pub deny_exec: bool,
     pub audit_only: bool,
+    /// Keeps deny_patterns blocking in audit mode; `profile` sets it so secrets are
+    /// never exposed while the session is observed
+    pub enforce_deny_patterns: bool,
     pub quiet: bool,
     pub log_path: PathBuf,
 }
@@ -95,6 +104,7 @@ impl Policy {
             allow_ips,
             deny_exec: args.deny_exec || file.process.deny_exec,
             audit_only: args.audit_only,
+            enforce_deny_patterns: false,
             quiet: args.quiet,
             log_path: args.log.clone().unwrap_or_else(|| default_trace_path(home)),
         }

@@ -113,13 +113,21 @@ fn handle(
     if !is_request_valid(fd, request.id) {
         return;
     }
-    let action = match (verdict.is_violation, context.policy.audit_only) {
-        (false, _) => Action::Allowed,
-        (true, true) => Action::Audited,
-        (true, false) => Action::Blocked,
-    };
+    let action = decide(&verdict, &context.policy);
     respond(fd, request.id, action == Action::Blocked);
     report(&verdict, action, request.pid, context);
+}
+
+fn decide(verdict: &Verdict, policy: &Policy) -> Action {
+    if !verdict.is_violation {
+        return Action::Allowed;
+    }
+    let keeps_blocking = !policy.audit_only || (verdict.is_secret && policy.enforce_deny_patterns);
+    if keeps_blocking {
+        Action::Blocked
+    } else {
+        Action::Audited
+    }
 }
 
 fn is_request_valid(fd: RawFd, id: u64) -> bool {
@@ -160,6 +168,7 @@ fn report(verdict: &Verdict, action: Action, pid: u32, context: &SupervisorConte
         target: verdict.target.clone(),
         pid: i32::try_from(pid).unwrap_or(i32::MAX),
         mcp_context,
+        write: verdict.is_write,
     });
 }
 
