@@ -11,6 +11,24 @@ impl Policy {
         self.rw = canonical_existing(&self.rw, cwd);
     }
 
+    /// MCP clients often start servers with cwd set to `/` or `$HOME`, which would turn the
+    /// default `.` grant into access to the whole system or home; such grants are removed
+    /// and returned so the caller can warn. Call after `resolve_paths`
+    pub fn drop_broad_grants(&mut self, home: Option<&Path>) -> Vec<PathBuf> {
+        let home = home.and_then(|home| home.canonicalize().ok());
+        let is_broad = |path: &PathBuf| path == Path::new("/") || home.as_ref() == Some(path);
+        let dropped: Vec<PathBuf> = self
+            .ro
+            .iter()
+            .chain(&self.rw)
+            .filter(|p| is_broad(p))
+            .cloned()
+            .collect();
+        self.ro.retain(|path| !is_broad(path));
+        self.rw.retain(|path| !is_broad(path));
+        dropped
+    }
+
     /// `path` must be absolute and canonical; mirrors the Landlock read/write split
     pub fn is_path_allowed(&self, path: &Path, is_write: bool) -> bool {
         let is_under = |roots: &[PathBuf]| roots.iter().any(|root| path.starts_with(root));

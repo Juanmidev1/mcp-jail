@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 
 use crate::landlock;
-use crate::policy::Policy;
+use crate::policy::{Policy, home_dir};
 use crate::rpc::RpcTracker;
 use crate::seccomp::{self, ChildSetup};
 use crate::supervisor::{self, SupervisorContext};
@@ -24,7 +24,7 @@ const EXECUTABLE_MODE_BITS: u32 = 0o111;
 /// Runs `command` inside the sandbox and returns its exit code
 pub fn run(command: &[String], mut policy: Policy) -> Result<i32, Box<dyn Error>> {
     colored::control::set_override(io::stderr().is_terminal());
-    policy.resolve_paths(&env::current_dir()?);
+    restrict_to_concrete_paths(&mut policy)?;
     let policy = Arc::new(policy);
     let tracer = Arc::new(Tracer::create(&policy.log_path)?);
     let audit_only = policy.audit_only;
@@ -51,6 +51,18 @@ pub fn run(command: &[String], mut policy: Policy) -> Result<i32, Box<dyn Error>
     let exit_code = outcome?;
     tracer.emit(EventKind::SessionEnd { exit_code });
     Ok(exit_code)
+}
+
+fn restrict_to_concrete_paths(policy: &mut Policy) -> io::Result<()> {
+    policy.resolve_paths(&env::current_dir()?);
+    for dropped in policy.drop_broad_grants(home_dir().as_deref()) {
+        eprintln!(
+            "mcp-jail: warning: refusing to grant {} wholesale (is the server started from / or \
+             $HOME?); pass --rw <project dir> or set cwd explicitly",
+            dropped.display()
+        );
+    }
+    Ok(())
 }
 
 /// Must run before spawn(): the child's execve blocks until the supervisor answers it.

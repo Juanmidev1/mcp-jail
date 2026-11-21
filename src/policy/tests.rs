@@ -150,3 +150,19 @@ fn resolved_paths_split_read_and_write_access() {
     assert!(!policy.is_path_allowed(Path::new("/usr/bin/env"), true));
     assert!(!policy.is_path_allowed(Path::new("/home/tester/notes"), false));
 }
+
+#[test]
+fn broad_grants_from_root_or_home_cwd_are_dropped() {
+    let home = tempfile::tempdir().unwrap();
+    let mut policy = build(PolicyFile::default(), &SandboxArgs::default());
+    policy.ro = vec![PathBuf::from("/usr"), PathBuf::from("/")];
+    policy.rw = vec![PathBuf::from(".")];
+    policy.resolve_paths(home.path());
+    let dropped = policy.drop_broad_grants(Some(home.path()));
+    assert_eq!(dropped.len(), 2);
+    assert_eq!(
+        policy.ro,
+        vec![PathBuf::from("/usr").canonicalize().unwrap()]
+    );
+    assert!(policy.rw.is_empty());
+}

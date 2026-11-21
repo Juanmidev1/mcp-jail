@@ -56,6 +56,7 @@ pub fn run(run: &RunArgs) -> Result<i32, Box<dyn Error>> {
 fn baseline(cwd: &Path, home: Option<&Path>) -> Policy {
     let mut policy = Policy::build(PolicyFile::default(), &SandboxArgs::default(), home);
     policy.resolve_paths(cwd);
+    policy.drop_broad_grants(home);
     policy
 }
 

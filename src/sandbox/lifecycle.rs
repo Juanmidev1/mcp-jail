@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, ExitStatus};
 use std::sync::Arc;
@@ -12,7 +13,8 @@ use crate::rpc::RpcTracker;
 use crate::trace::Tracer;
 
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
-const WAIT_INTERVAL: Duration = Duration::from_millis(20);
+// Bounds how quickly signals and client EOF are noticed; child exit wakes immediately
+const WAIT_INTERVAL_MS: libc::c_int = 20;
 const SIGNAL_EXIT_BASE: i32 = 128;
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -51,6 +53,7 @@ fn wait_for_exit(
     group: libc::pid_t,
     stdin_forwarder: &JoinHandle<io::Result<()>>,
 ) -> io::Result<ExitStatus> {
+    let pidfd = open_pidfd(group);
     let mut kill_deadline: Option<Instant> = None;
     loop {
         if let Some(status) = child.try_wait()? {
@@ -66,8 +69,30 @@ fn wait_for_exit(
         if kill_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             kill_group(group, libc::SIGKILL);
         }
-        thread::sleep(WAIT_INTERVAL);
+        wait_interval(pidfd.as_ref());
     }
+}
+
+/// Opened before the child is reaped, so the pid cannot be recycled underneath it;
+/// `None` on kernels older than 5.3
+fn open_pidfd(pid: libc::pid_t) -> Option<OwnedFd> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    let fd = RawFd::try_from(fd).ok().filter(|&fd| fd >= 0)?;
+    Some(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Returns as soon as the child exits, or after WAIT_INTERVAL_MS otherwise
+fn wait_interval(pidfd: Option<&OwnedFd>) {
+    let Some(pidfd) = pidfd else {
+        thread::sleep(Duration::from_millis(WAIT_INTERVAL_MS as u64));
+        return;
+    };
+    let mut poll_fd = libc::pollfd {
+        fd: pidfd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    unsafe { libc::poll(&mut poll_fd, 1, WAIT_INTERVAL_MS) };
 }
 
 /// Installed before spawn so an early Ctrl-C cannot orphan the server's process group

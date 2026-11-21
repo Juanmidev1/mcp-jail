@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Release binary budget from the spec (2.5 MB)
+  MAX_BINARY_BYTES: 2621440
+
+jobs:
+  check:
+    name: fmt, clippy, test, size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Kernel sandbox support
+        run: |
+          uname -r
+          cat /sys/kernel/security/lsm || true
+          cat /proc/sys/kernel/yama/ptrace_scope || true
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Kernel-dependent tests print "skipping" instead of failing when Landlock is absent
+      - name: Test
+        run: cargo test -- --nocapture
+
+      - name: Release binary size
+        run: |
+          cargo build --release
+          size=$(stat -c %s target/release/mcp-jail)
+          echo "release binary: ${size} bytes (limit ${MAX_BINARY_BYTES})"
+          test "${size}" -lt "${MAX_BINARY_BYTES}"
